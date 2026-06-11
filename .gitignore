@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+logs/
+snapshots/
+models/
+zones/zones.json
+*.db
+*.pt
+*.mp4
+*.avi
+.DS_Store
