@@ -1,3 +1,7 @@
+import uvicorn
+import threading
+from datetime import datetime
+from api.server import push_alert, clear_alert, update_status
 import cv2
 import time
 from config import SOURCE, SHOW_DISPLAY
@@ -17,6 +21,16 @@ from utils.geometry import get_three_feet_points
 
 def main():
     print("\n=== Loitering Detection System Starting ===\n")
+
+    # --- Start FastAPI in background thread ---
+    api_thread = threading.Thread(
+        target=uvicorn.run,
+        kwargs={"app": "api.server:app", "host": "0.0.0.0", "port": 8000, "log_level": "warning"},
+        daemon=True
+    )
+    api_thread.start()
+    print("[API] Server started at http://localhost:8000")
+    print("[API] Docs at http://localhost:8000/docs\n")
 
     # --- Init all modules ---
     detector     = Detector()
@@ -89,16 +103,25 @@ def main():
                 alert_count += 1
                 alert_mgr.handle_alert(frame, tid, zone_name, elapsed)
 
-                # Log to DB once per alert ID
                 if tid not in db_logged_ids:
-                    db.log_event(tid, zone_name, elapsed)
+                    snap = db.log_event(tid, zone_name, elapsed)
                     db_logged_ids.add(tid)
 
+        # Push to FastAPI
+                    push_alert(
+                        camera_id="cam_01",
+                        track_id=tid,
+                        zone_id=zone_name,
+                        dwell_seconds=elapsed,
+                        last_bbox=[x1, y1, x2, y2],
+                        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    )
+
             else:
-                # If person left zone and timer reset, allow re-logging
                 if tid in db_logged_ids and elapsed == 0:
                     db_logged_ids.discard(tid)
                     alert_mgr.reset_id(tid)
+                    clear_alert(tid)    # remove from live alerts
 
         # --- Cleanup lost tracks ---
         loiter_eng.cleanup_lost_tracks(active_ids)
@@ -112,6 +135,7 @@ def main():
             fps = frame_count
             frame_count = 0
             fps_timer = time.time()
+            update_status("cam_01", True, fps, len(tracks), alert_count)
         draw_fps(frame, fps)
 
         # --- Display ---
